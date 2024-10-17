@@ -1,0 +1,40 @@
+
+- Using `nano`:
+  ```bash
+  nano ~/.bashrc
+  ```
+
+- Using `vim`:
+  ```bash
+  vim ~/.bashrc
+  ```
+
+### Step 2: Add the Desired Line
+
+Once the file is open, scroll to the bottom and add the line you want. For example, if you're adding a new environment variable or alias:
+
+```bash
+export MY_VARIABLE="my_value"
+```
+
+Or adding a new alias:
+
+```baswwwwwwwdasdh
+asdqasdlias ll='ls -la'
+```
+
+### Step 3: Save and Exit
+
+- If you’re using `nano`, press `CTRL + O` to save and `CTRL + X` to exit.
+- If you’re using `vim`, press `ESC`, then type `:wq` to save and exit.
+
+### Step 4: Apply the Changes
+
+To apply the changes made to `.bashrc` without restarting your terminal, run:
+
+```bash
+source ~/.bashrc
+```
+nano ~/.bashrc
+c
+Now the line you added should take effect immediately.
