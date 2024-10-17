@@ -1,4 +1,4 @@
-# Pytorch Implementation Contrastive Reinforcement Learning
+# Pytorch Implementation of Contrastive Reinforcement Learning
 This repository includes a pytorch implementation of Contrastive Learning as Goal-Conditioned RL. 
 
 ## Acknowledgement:
