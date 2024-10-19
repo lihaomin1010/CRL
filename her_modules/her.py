@@ -30,10 +30,18 @@ class her_sampler:
         # replace go with achieved goal
         future_ag = episode_batch["ag"][episode_idxs[her_indexes], future_t]
         transitions["g"][her_indexes] = future_ag
+        
+        
         # to get the params to re-compute reward
-        transitions["r"] = np.expand_dims(
-            self.reward_func(transitions["ag_next"], transitions["g"], None), 1
-        )
+        # transitions['r'] = np.expand_dims(self.reward_func(transitions['ag_next'], transitions['g'], None), 1)
+        dist = np.linalg.norm(transitions['ag_next'] -  transitions['g'],axis=1)
+        r = dist.copy()
+        r[dist < 0.05] = 1
+        r[dist >= 0.05] = 0
+        r = r.reshape(-1,1)
+        transitions['r'] = r
+        
+
         transitions = {
             k: transitions[k].reshape(batch_size, *transitions[k].shape[1:])
             for k in transitions.keys()

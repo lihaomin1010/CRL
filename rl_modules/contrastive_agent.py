@@ -261,8 +261,7 @@ class contrastive_agent:
         # sample the episodes
         transitions = self.buffer.sample(self.args.batch_size, train=True)
 
-        if self.args.augment:
-            transitions = augmentBatch_SO2_fetch_push_pick(transitions)
+ 
 
         # pre-process the observation and goal
         o, o_next, g, random_g = (

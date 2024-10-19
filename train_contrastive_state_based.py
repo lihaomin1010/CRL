@@ -547,7 +547,6 @@ def launch(args):
       
     print("Seed: ", seed)
     print("GPU: ", args.cuda)
-    print("Augment: ", args.augment)
 
 
 
