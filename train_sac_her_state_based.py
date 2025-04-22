@@ -50,7 +50,6 @@ def load(env_name):
     CLASS = FetchReachEnv
     max_episode_steps = 50
   elif env_name == 'fetch_push':
-    # CLASS = FetchPushEnv
     CLASS = FetchPushEnv2
     max_episode_steps = 50
   elif env_name == 'fetch_pick_and_place':

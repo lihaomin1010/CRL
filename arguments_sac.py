@@ -44,6 +44,9 @@ def get_args():
     parser.add_argument('--action-repeat', type=int, default=10, help='repeat the action for n times')
     parser.add_argument('--n-updates', type=int, default=16, help='The times to update the network but during an episode itself (different from n-batches)')
     parser.add_argument('--num-envs', type=int, default=8, help='Number of environments')
+    parser.add_argument(
+        "--disable_wandb", action="store_true", help="Use this flag to disable wandb logging"
+    )
 
 
     args = parser.parse_args()

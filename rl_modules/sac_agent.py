@@ -10,6 +10,8 @@ from rl_modules.utils import get_action_info
 from mpi_utils.normalizer import normalizer
 from her_modules.her import her_sampler
 
+import wandb
+
 
 """
 SAC with HER
@@ -72,6 +74,23 @@ class sac_agent:
         # create the normalizer
         self.o_norm = normalizer(size=env_params['obs'], default_clip_range=self.args.clip_range)
         self.g_norm = normalizer(size=env_params['goal'], default_clip_range=self.args.clip_range)
+
+        wandb.login()
+        
+        config={
+                "learning_rate": args.lr_actor,
+                "algorithm": "SAC + HER",
+                "env": args.env_name,
+                "seed": args.seed,
+                "Task": "Contrastive RL",
+            }
+        config.update(args.__dict__)
+
+        run = wandb.init(
+            project="Equi_Contrastive_RL",
+            config = config,
+            mode = "disabled" if args.disable_wandb else "online",
+        )
 
     
     def process_obs(self, obs):
@@ -333,4 +352,7 @@ class sac_agent:
         
 
         local_success_rate = np.mean(total_success_rate)
+
+
+        wandb.log({"Evaluated Reward": local_success_rate}, step=self.timesteps)
         return local_success_rate
