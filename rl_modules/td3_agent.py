@@ -65,6 +65,24 @@ class td3_agent:
         # create the normalizer
         self.o_norm = normalizer(size=env_params['obs'], default_clip_range=self.args.clip_range)
         self.g_norm = normalizer(size=env_params['goal'], default_clip_range=self.args.clip_range)
+
+
+        wandb.login()
+        
+        config={
+                "learning_rate": args.lr_actor,
+                "algorithm": "TD3 + HER",
+                "env": args.env_name,
+                "seed": args.seed,
+                "Task": "Contrastive RL",
+            }
+        config.update(args.__dict__)
+
+        run = wandb.init(
+            project="Equi_Contrastive_RL",
+            config = config,
+            mode = "disabled" if args.disable_wandb else "online",
+        )
         
     
     def process_obs(self, obs):
@@ -320,4 +338,5 @@ class td3_agent:
         
 
         local_success_rate = np.mean(total_success_rate)
+        wandb.log({"Evaluated Reward": local_success_rate}, step=self.timesteps)
         return local_success_rate
