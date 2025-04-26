@@ -46,6 +46,7 @@ def get_args():
     parser.add_argument('--num-envs', type=int, default=8, help='Number of environments')
     parser.add_argument("--disable_wandb", action="store_true", help="Use this flag to disable wandb logging")
     parser.add_argument("--use_bc_with_rl", action="store_true", help="Use this flag to do RLfD")
+    parser.add_argument('--num_bc_demos', type=int, default=5, help='the number of expert demos to train the agent for RLfD')
 
 
 

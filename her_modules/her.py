@@ -35,9 +35,11 @@ class her_sampler:
         # to get the params to re-compute reward
         # transitions['r'] = np.expand_dims(self.reward_func(transitions['ag_next'], transitions['g'], None), 1)
         dist = np.linalg.norm(transitions['ag_next'] -  transitions['g'],axis=1)
+        
         r = dist.copy()
         r[dist < 0.05] = 1
         r[dist >= 0.05] = 0
+
         r = r.reshape(-1,1)
         transitions['r'] = r
         

@@ -181,13 +181,14 @@ class td3_agent:
 
         """
         # Load the expert buffer if it exists
-        if os.path.exists("expert_buffers"):
-            self.expert_buffer.load_replay_buffer(
-                os.path.join("expert_buffers", "expert_demos_{}_{}.pkl".format(self.args.env_name, self.args.num_bc_demos))
-            )
-            print("Loaded Expert Buffer")
-        else:
-            print("No Expert Buffer Found")
+        if self.args.use_bc_with_rl:
+            if os.path.exists("expert_buffers"):
+                self.expert_buffer.load_replay_buffer(
+                    os.path.join("expert_buffers", "expert_demos_{}_{}.pkl".format(self.args.env_name, self.args.num_bc_demos))
+                )
+                print("Loaded Expert Buffer")
+            else:
+                print("No Expert Buffer Found, so Skipping")
 
         # start to collect samples
         for epoch in range(self.args.n_epochs):
@@ -409,11 +410,9 @@ class td3_agent:
             if self.args.use_bc_with_rl:
                 # --- Sample and process expert transitions for BC loss ---
                 expert_transitions = self.expert_buffer.sample(self.args.batch_size, train=True)
-                o_e, o_next_e, g_e, random_g_e = (
+                o_e,g_e = (
                     expert_transitions["obs"],
-                    expert_transitions["obs_next"],
                     expert_transitions["g"],
-                    expert_transitions["random_g"],
                 )
                 expert_transitions["obs"], expert_transitions["g"] = self._preproc_og(o_e, g_e)
 
