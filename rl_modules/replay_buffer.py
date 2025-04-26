@@ -1,5 +1,6 @@
 import threading
 import numpy as np
+import pickle
 
 """
 the replay buffer here is basically from the openai baselines code
@@ -67,6 +68,53 @@ class replay_buffer:
         if inc == 1:
             idx = idx[0]
         return idx
+    
+
+    def save_replay_buffer(self, file_path):
+        """
+        Save the replay buffer's state to a file.
+
+        Args:
+            file_path (str): The path (including filename) where the replay buffer state will be saved.
+        """
+        # Prepare a dictionary with the state to save.
+        state = {
+            'env_params': self.env_params,
+            'T': self.T,
+            'size': self.size,
+            'current_size': self.current_size,
+            'n_transitions_stored': self.n_transitions_stored,
+            'buffers': self.buffers
+        }
+
+        with open(file_path, 'wb') as f:
+            pickle.dump(state, f)
+        print(f"Replay buffer saved to {file_path}")
+
+
+
+
+    def load_replay_buffer(self, file_path):
+        """
+        Load the replay buffer's state from a file.
+
+        Args:
+            file_path (str): The path to the file containing the replay buffer state.
+        """
+        with open(file_path, 'rb') as f:
+            state = pickle.load(f)
+        
+        self.env_params = state['env_params']
+        self.T = state['T']
+        self.size = state['size']
+        self.current_size = state['current_size']
+        self.n_transitions_stored = state['n_transitions_stored']
+        self.buffers = state['buffers']
+        
+        # Recreate the lock as it isn't serialisable.
+        self.lock = threading.Lock()
+        
+        print(f"Replay buffer loaded from {file_path}")
 
 
 class replay_buffer_img:
