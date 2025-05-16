@@ -125,6 +125,7 @@ def get_args():
         help="The times to update the network but during an episode itself (different from n-batches)",
     )
 
+    parser.add_argument("--tri", type=bool, default=False, help="whether to use tri mode")
 
     args = parser.parse_args()
 

@@ -56,6 +56,11 @@ class contrastive_sampler:
         future_ag = episode_batch["ag"][episode_idxs, future_t]
         transitions["g"] = future_ag
 
+
+        mid_offest = np.random.randint(0, T, batch_size)
+        mid_t = np.minimum(mid_offest, future_t)
+        transitions["mid_g"] = episode_batch["ag"][episode_idxs, mid_t].copy()
+
         # transitions = {key: episode_batch[key][episode_idxs, t_samples].copy() for key in episode_batch.keys()}
 
         # to get the params to re-compute reward

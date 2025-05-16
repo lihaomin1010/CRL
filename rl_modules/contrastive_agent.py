@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import os
 from datetime import datetime
 import numpy as np
@@ -9,7 +10,6 @@ from rl_modules.contrastive_models import tanh_gaussian_actor, flatten_mlp_contr
 from rl_modules.utils import get_action_info
 from mpi_utils.normalizer import normalizer
 from her_modules.contrastive_replay import contrastive_sampler
-
 
 from rl_modules.replay_buffer import replay_buffer
 from rl_modules.contrastive_models import tanh_gaussian_actor, flatten_mlp_contrastive
@@ -32,7 +32,10 @@ class contrastive_agent:
         self.grad_updates = 0
         self.action_max = self.env.action_space.high
         self.BCE_loss = torch.nn.BCEWithLogitsLoss()
-
+        self.margin = 1e-8
+        self.tri = args.tri
+        self.epoch = 0
+        self.need_print = True
 
         print("GPU:", self.args.cuda)
         if self.args.cuda:
@@ -40,7 +43,6 @@ class contrastive_agent:
         else:
             self.device = torch.device("cpu")
 
-        
         self.actor_network = tanh_gaussian_actor(
             env_params["obs"] + env_params["goal"],
             env_params["action"],
@@ -55,7 +57,6 @@ class contrastive_agent:
             repr_dims=64,
             action_dims=env_params["action"],
         ).to(self.device)
-
 
         # sync the networks across the cpus
         sync_networks(self.actor_network)
@@ -98,8 +99,6 @@ class contrastive_agent:
             size=env_params["goal"], default_clip_range=self.args.clip_range
         )
 
-
-
     def process_observation(self, obs):
         """
         process the observation
@@ -108,15 +107,13 @@ class contrastive_agent:
         obs_dict = {}
         obs_dict["observation"] = obs[: self.env_params["obs"]]
         obs_dict["desired_goal"] = obs[
-            self.env_params["obs"] : 2 * self.env_params["obs"]
-        ]
+                                   self.env_params["obs"]: 2 * self.env_params["obs"]
+                                   ]
         obs_dict["achieved_goal"] = obs[
-            2 * self.env_params["obs"] : 3 * self.env_params["obs"]
-        ]
+                                    2 * self.env_params["obs"]: 3 * self.env_params["obs"]
+                                    ]
         return obs_dict
 
-    
-    
     def learn(self):
         """
         train the network
@@ -150,7 +147,7 @@ class contrastive_agent:
                             self.timesteps += 1
 
                         if (self.timesteps > self.args.init_exploration_steps) and (
-                            self.timesteps % self.args.n_updates == 0
+                                self.timesteps % self.args.n_updates == 0
                         ):
                             for _ in range(self.args.n_updates):
                                 self.grad_updates += 1
@@ -158,20 +155,19 @@ class contrastive_agent:
                                 # train the network
                                 self._update_network()
 
-
                         # feed the actions into the environment
                         observation_new, _, _, info = self.env.step(action)
 
                         observation_new = self.process_observation(observation_new)
                         obs_new = observation_new["observation"]
                         ag_new = observation_new["achieved_goal"]
-                        
+
                         # append rollouts
                         ep_obs.append(obs.copy())
                         ep_ag.append(ag.copy())
                         ep_g.append(g.copy())
                         ep_actions.append(action.copy())
-                        
+
                         # re-assign the observation
                         obs = obs_new
                         ag = ag_new
@@ -203,7 +199,7 @@ class contrastive_agent:
                     self.grad_updates,
                 )
             )
-
+            self.epoch = epoch
 
     # pre_process the inputs
     def _preproc_inputs(self, obs, g):
@@ -218,7 +214,6 @@ class contrastive_agent:
         if self.args.cuda:
             inputs = inputs.cuda()
         return inputs
-
 
     # update the normalizer
     def _update_normalizer(self, episode_batch):
@@ -239,45 +234,46 @@ class contrastive_agent:
         transitions = self.her_module.sample_her_transitions(
             buffer_temp, num_transitions
         )
-        obs, g = transitions["obs"], transitions["g"]
+        obs, mid_g, g = transitions["obs"], transitions["mid_g"], transitions["g"]
         # pre process the obs and g
         transitions["obs"], transitions["g"] = self._preproc_og(obs, g)
+        transitions["obs"], transitions["mid_g"] = self._preproc_og(obs, mid_g)
         # update
         self.o_norm.update(transitions["obs"])
         self.g_norm.update(transitions["g"])
+        self.g_norm.update(transitions["mid_g"])
         # recompute the stats
         self.o_norm.recompute_stats()
         self.g_norm.recompute_stats()
+        self.g_norm.update(transitions["mid_g"])
 
-    
     def _preproc_og(self, o, g):
         o = np.clip(o, -self.args.clip_obs, self.args.clip_obs)
         g = np.clip(g, -self.args.clip_obs, self.args.clip_obs)
         return o, g
-
 
     # update the network
     def _update_network(self):
         # sample the episodes
         transitions = self.buffer.sample(self.args.batch_size, train=True)
 
- 
-
         # pre-process the observation and goal
-        o, o_next, g, random_g = (
+        o, o_next, g, random_g, mg = (
             transitions["obs"],
             transitions["obs_next"],
             transitions["g"],
             transitions["random_g"],
+            transitions["mid_g"],
         )
         transitions["obs"], transitions["g"] = self._preproc_og(o, g)
         transitions["obs_next"], transitions["g_next"] = self._preproc_og(o_next, g)
         transitions["obs"], transitions["random_g"] = self._preproc_og(o, random_g)
+        transitions["obs"], transitions["mid_g"] = self._preproc_og(o, mg)
 
         # start to do the update
         obs_norm = self.o_norm.normalize(transitions["obs"])
         g_norm = self.g_norm.normalize(transitions["g"])
-        
+        mg_norm = self.g_norm.normalize(transitions["mid_g"])
 
         inputs_norm = np.concatenate([obs_norm, g_norm], axis=1)
 
@@ -288,6 +284,7 @@ class contrastive_agent:
         # transfer them into the tensor
         obs_norm_tensor = torch.tensor(obs_norm, dtype=torch.float32)
         g_norm_tensor = torch.tensor(g_norm, dtype=torch.float32)
+        mg_norm_tensor = torch.tensor(mg_norm, dtype=torch.float32)
         random_g_norm_tensor = torch.tensor(random_g_norm, dtype=torch.float32)
         inputs_norm_tensor = torch.tensor(inputs_norm, dtype=torch.float32)
         inputs_actor_norm_tensor = torch.tensor(inputs_actor_norm, dtype=torch.float32)
@@ -296,6 +293,7 @@ class contrastive_agent:
         if self.args.cuda:
             obs_norm_tensor = obs_norm_tensor.cuda()
             g_norm_tensor = g_norm_tensor.cuda()
+            mg_norm_tensor = mg_norm_tensor.cuda()
             random_g_norm_tensor = random_g_norm_tensor.cuda()
             inputs_norm_tensor = inputs_norm_tensor.cuda()
             inputs_actor_norm_tensor = inputs_actor_norm_tensor.cuda()
@@ -308,7 +306,7 @@ class contrastive_agent:
 
         # use the automatically tuning
         alpha_loss = -(
-            self.log_alpha * (log_prob + self.target_entropy).detach()
+                self.log_alpha * (log_prob + self.target_entropy).detach()
         ).mean()
         self.alpha_optim.zero_grad()
         alpha_loss.backward()
@@ -324,7 +322,7 @@ class contrastive_agent:
         self.avg_q_values = q_actions_.mean().detach().cpu().item()
 
         # Calculate the critic loss
-        qf1_loss = self.critic_loss(obs_norm_tensor, g_norm_tensor, actions_tensor)
+        qf1_loss = self.critic_loss(obs_norm_tensor, g_norm_tensor, actions_tensor, mg_norm_tensor)
 
         # start to update the network
         self.actor_optim.zero_grad()
@@ -336,10 +334,8 @@ class contrastive_agent:
         qf1_loss.backward()
         self.critic_optim1.step()
 
-
-
     def calculate_q_values(
-        self, observations_tensor, goals_tensor, actor_update_actions
+            self, observations_tensor, goals_tensor, actor_update_actions
     ):
         sa_repr, g_repr = self.critic1(
             observation=observations_tensor,
@@ -347,23 +343,41 @@ class contrastive_agent:
             action=actor_update_actions,
         )
 
-
         # Contrastive Learning with inner product
         q_values = torch.einsum("ik,ik->i", sa_repr, g_repr)
 
         return q_values
 
-    def critic_loss(self, observations_tensor, goals_tensor, actions):
+    def critic_loss(self, observations_tensor, goals_tensor, actions, mid_goal_tensor=None):
         sa_repr, g_repr = self.critic1(
             observation=observations_tensor, goal=goals_tensor, action=actions
+        )
+
+        sa_repr, mg_repr = self.critic1(
+            observation=observations_tensor, goal=mid_goal_tensor, action=actions
         )
 
         # Contrastive Learning with inner product
         logits = torch.einsum("ik,jk->ij", sa_repr, g_repr)
 
         targets = torch.eye(self.args.batch_size, device=logits.device)
-        loss = self.BCE_loss(logits, targets)
 
+        dlog = torch.einsum("ik,ik->i", sa_repr, g_repr)
+        mdlog = torch.einsum("ik,ik->i", sa_repr, mg_repr)
+
+        if self.epoch % 5 == 0:
+            if self.need_print:
+                print("dlog=", dlog)
+                print("mdlog=", mdlog)
+                print(dlog - mdlog)
+                self.need_print = False
+        else:
+            if not self.need_print:
+                self.need_print = True
+        if self.tri:
+            loss = self.BCE_loss(logits, targets) + 0.1 * F.relu(dlog - mdlog + self.margin).mean()
+        else:
+            loss = self.BCE_loss(logits, targets)
         return loss
 
     # do the evaluation
