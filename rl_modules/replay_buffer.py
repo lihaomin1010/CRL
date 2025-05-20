@@ -9,7 +9,7 @@ the replay buffer here is basically from the openai baselines code
 
 
 class replay_buffer:
-    def __init__(self, env_params, buffer_size, sample_func):
+    def __init__(self, env_params, buffer_size, sample_func, sample_cross_func=None):
         self.env_params = env_params
         self.T = env_params["max_timesteps"]
         self.size = buffer_size // self.T
@@ -17,6 +17,7 @@ class replay_buffer:
         self.current_size = 0
         self.n_transitions_stored = 0
         self.sample_func = sample_func
+        self.sample_cross_func = sample_cross_func
         # create the buffer to store info
         self.buffers = {
             "obs": np.empty([self.size, self.T + 1, self.env_params["obs"]]),
@@ -52,6 +53,19 @@ class replay_buffer:
         # transitions = self.sample_func(temp_buffers, batch_size,train=train)
         transitions = self.sample_func(temp_buffers, batch_size)
         return transitions
+
+    def sample_cross(self, batch_size, train=False):
+        temp_buffers = {}
+        with self.lock:
+            for key in self.buffers.keys():
+                temp_buffers[key] = self.buffers[key][: self.current_size]
+        temp_buffers["obs_next"] = temp_buffers["obs"][:, 1:, :]
+        temp_buffers["ag_next"] = temp_buffers["ag"][:, 1:, :]
+        # sample transitions
+        # transitions = self.sample_func(temp_buffers, batch_size,train=train)
+        transitions = self.sample_cross_func(temp_buffers, batch_size)
+        return transitions
+
 
     def _get_storage_idx(self, inc=None):
         inc = inc or 1

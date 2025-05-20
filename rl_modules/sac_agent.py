@@ -69,7 +69,7 @@ class sac_agent:
         self.her_module = her_sampler(self.args.replay_strategy, self.args.replay_k)
         
         # create the replay buffer
-        self.buffer = replay_buffer(self.env_params, self.args.buffer_size, self.her_module.sample_her_transitions)
+        self.buffer = replay_buffer(self.env_params, self.args.buffer_size, self.her_module.sample_her_transitions, self.her_module.sample_her_transitions_cross)
         
         # create the normalizer
         self.o_norm = normalizer(size=env_params['obs'], default_clip_range=self.args.clip_range)
@@ -135,6 +135,7 @@ class sac_agent:
                             for _ in range(self.args.n_updates):
                                 # train the network
                                 self._update_network()
+                                self._update_network_2()
                             
                             self.grad_updates += self.args.n_updates
                             
@@ -302,8 +303,9 @@ class sac_agent:
             log_prob_next = actions_info_next.get_log_prob(actions_next_, pre_tanh_value_next)
             
             target_q_value_next = torch.min(self.critic_target_network1(inputs_next_norm_tensor, actions_next_), self.critic_target_network2(inputs_next_norm_tensor, actions_next_)) - alpha * log_prob_next
-            target_q_value = r_tensor + self.args.gamma * target_q_value_next 
-        
+            #target_q_value = r_tensor + self.args.gamma * target_q_value_next
+            target_q_value = r_tensor + target_q_value_next
+
         qf1_loss = (q1_value - target_q_value).pow(2).mean()
         qf2_loss = (q2_value - target_q_value).pow(2).mean()
 
@@ -313,6 +315,103 @@ class sac_agent:
         actor_loss.backward()
         self.actor_optim.step()
         
+        # update the critic_network1
+        self.critic_optim1.zero_grad()
+        qf1_loss.backward()
+        self.critic_optim1.step()
+
+        # update the critic_network2
+        self.critic_optim2.zero_grad()
+        qf2_loss.backward()
+        self.critic_optim2.step()
+
+    def _update_network_2(self):
+        # sample the episodes
+        transitions = self.buffer.sample_cross(self.args.batch_size)
+
+        # pre-process the observation and goal
+        o_next, g, ag_next = transitions['obs_next'], transitions['g'], transitions['ag_next']
+        neighbor_o, neighbor_o_next, neighbor_ag_next = transitions['neighbor_obs'], transitions['neighbor_obs_next'], transitions['neighbor_ag_next']
+
+        transitions['obs_next'], transitions['g_next'] = self._preproc_og(o_next, g)
+        transitions['neighbor_obs'], transitions['neighbor_g'] = self._preproc_og(neighbor_o, ag_next)
+        transitions['cross_obs'], transitions['cross_g'] = self._preproc_og(neighbor_o, g)
+
+
+
+
+        # start to do the update
+
+        obs_next_norm = self.o_norm.normalize(transitions['obs_next'])
+        g_next_norm = self.g_norm.normalize(transitions['g_next'])
+        inputs_next_norm = np.concatenate([obs_next_norm, g_next_norm], axis=1)
+
+        neighbor_obs_norm = self.o_norm.normalize(transitions['neighbor_obs'])
+        neighbor_g_norm = self.g_norm.normalize(transitions['neighbor_g'])
+        inputs_neighbor_norm = np.concatenate([neighbor_obs_norm, neighbor_g_norm], axis=1)
+
+        cross_obs_norm = self.o_norm.normalize(transitions['cross_obs'])
+        cross_g_norm = self.g_norm.normalize(transitions['cross_g'])
+        inputs_cross_norm = np.concatenate([cross_obs_norm, cross_g_norm], axis=1)
+
+
+        # transfer them into the tensor
+        inputs_next_norm_tensor = torch.tensor(inputs_next_norm, dtype=torch.float32)
+        inputs_neighbor_norm_tensor = torch.tensor(inputs_neighbor_norm, dtype=torch.float32)
+        inputs_cross_norm_tensor = torch.tensor(inputs_cross_norm, dtype=torch.float32)
+
+        #actions_tensor = torch.tensor(transitions['neighbor_actions'], dtype=torch.float32)
+        #neighbor_r_tensor = torch.tensor(transitions['neighbor_r'], dtype=torch.float32)
+
+
+        if self.args.cuda:
+            inputs_next_norm_tensor = inputs_next_norm_tensor.cuda()
+            inputs_neighbor_norm_tensor = inputs_neighbor_norm_tensor.cuda()
+            inputs_cross_norm_tensor = inputs_cross_norm_tensor.cuda()
+
+            #actions_tensor = actions_tensor.cuda()
+            #neighbor_r_tensor = neighbor_r_tensor.cuda()
+
+
+        alpha = self.log_alpha.exp()
+
+        pis_next = self.actor_network(inputs_cross_norm_tensor)
+        actions_info_next = get_action_info(pis_next, cuda=self.args.cuda)
+        actions_next_, pre_tanh_value_next = actions_info_next.select_actions(reparameterize=True)
+
+        q1_value = self.critic_target_network1(inputs_next_norm_tensor, actions_next_.detach())
+        q2_value = self.critic_target_network2(inputs_next_norm_tensor, actions_next_.detach())
+        target_q_value_cross = torch.min(q1_value, q2_value)
+
+        with torch.no_grad():
+            pis_next = self.actor_network(inputs_next_norm_tensor)
+            actions_info_next = get_action_info(pis_next, cuda=self.args.cuda)
+            actions_next_, pre_tanh_value_next = actions_info_next.select_actions(reparameterize=True)
+            log_prob_next = actions_info_next.get_log_prob(actions_next_, pre_tanh_value_next)
+
+            target_q_value_next = torch.min(self.critic_target_network1(inputs_next_norm_tensor, actions_next_),
+                                            self.critic_target_network2(inputs_next_norm_tensor,
+                                                                        actions_next_))
+
+
+            pis_next = self.actor_network(inputs_neighbor_norm_tensor)
+            actions_info_next = get_action_info(pis_next, cuda=self.args.cuda)
+            actions_next_, pre_tanh_value_next = actions_info_next.select_actions(reparameterize=True)
+            log_prob_next = actions_info_next.get_log_prob(actions_next_, pre_tanh_value_next)
+
+            target_q_value_neighbor = torch.min(self.critic_target_network1(inputs_next_norm_tensor, actions_next_),
+                                            self.critic_target_network2(inputs_next_norm_tensor,
+                                                                        actions_next_))
+
+
+
+            weight = torch.relu(target_q_value_next+ target_q_value_neighbor  - target_q_value_cross)
+
+            target_q_value = target_q_value_next + target_q_value_neighbor
+
+        qf1_loss = (weight * (q1_value - target_q_value)).pow(2).mean()
+        qf2_loss = (weight * (q2_value - target_q_value)).pow(2).mean()
+
         # update the critic_network1
         self.critic_optim1.zero_grad()
         qf1_loss.backward()
