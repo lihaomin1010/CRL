@@ -48,7 +48,7 @@ def get_args():
     parser.add_argument("--use_bc_with_rl", action="store_true", help="Use this flag to do RLfD")
     parser.add_argument('--num_bc_demos', type=int, default=5, help='the number of expert demos to train the agent for RLfD')
 
-
+    parser.add_argument('--rnd', type=bool, default=False, help='use rnd')
 
     args = parser.parse_args()
 

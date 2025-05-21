@@ -8,6 +8,8 @@ from rl_modules.replay_buffer import replay_buffer
 from rl_modules.td3_models import deterministic_actor, flatten_mlp
 from mpi_utils.normalizer import normalizer
 from her_modules.her import her_sampler
+from her_modules.rnd import RND
+from her_modules.normalize import Normalizer
 
 import wandb
 
@@ -50,7 +52,10 @@ class td3_agent:
             self.actor_target_network.cuda()
             self.critic_target_network1.cuda()
             self.critic_target_network2.cuda()
-        
+
+        if args.rnd:
+            self.rnd_worker = RND(env_params['obs'], name="sac")
+
         # create the optimizer
         self.actor_optim = torch.optim.Adam(self.actor_network.parameters(), lr=self.args.lr_actor)
         self.critic_optim1 = torch.optim.Adam(self.critic_network1.parameters(), lr=self.args.lr_critic)
@@ -250,14 +255,21 @@ class td3_agent:
         inputs_norm_tensor = torch.tensor(inputs_norm, dtype=torch.float32)
         inputs_next_norm_tensor = torch.tensor(inputs_next_norm, dtype=torch.float32)
         actions_tensor = torch.tensor(transitions['actions'], dtype=torch.float32)
-        r_tensor = torch.tensor(transitions['r'], dtype=torch.float32) 
-        
+        r_tensor = torch.tensor(transitions['r'], dtype=torch.float32)
+        obs_norm_tensor = torch.tensor(obs_norm, dtype=torch.float32)
+        obs_next_norm_tensor = torch.tensor(obs_next_norm, dtype=torch.float32)
+
         if self.args.cuda:
             inputs_norm_tensor = inputs_norm_tensor.cuda()
             inputs_next_norm_tensor = inputs_next_norm_tensor.cuda()
             actions_tensor = actions_tensor.cuda()
             r_tensor = r_tensor.cuda()
-        
+            obs_norm_tensor = obs_norm_tensor.cuda()
+            obs_next_norm_tensor = obs_next_norm_tensor.cuda()
+
+        self.rnd_worker.train(obs_norm_tensor)
+        intrinsic_reward = self.rnd_worker.get_intrinsic_reward(obs_next_norm_tensor)
+
         # calculate the target Q value function
         with torch.no_grad():
             actions_next = self.actor_target_network(inputs_next_norm_tensor)
@@ -270,7 +282,8 @@ class td3_agent:
             q_next_value = torch.min(q_next_value1, q_next_value2)
             
             q_next_value = q_next_value.detach()
-            target_q_value = r_tensor + self.args.gamma * q_next_value
+            #target_q_value = r_tensor + self.args.gamma * q_next_value
+            target_q_value = r_tensor + intrinsic_reward + q_next_value
             target_q_value = target_q_value.detach()
             
         

@@ -9,6 +9,8 @@ from rl_modules.sac_models import tanh_gaussian_actor, flatten_mlp
 from rl_modules.utils import get_action_info
 from mpi_utils.normalizer import normalizer
 from her_modules.her import her_sampler
+from her_modules.rnd import RND
+from her_modules.normalize import Normalizer
 
 import wandb
 
@@ -46,6 +48,10 @@ class sac_agent:
         self.target_entropy = -1 * env_params['action']
         # self.target_entropy = 0
         self.log_alpha = torch.zeros(1, requires_grad=True)
+
+        self.rnd_worker = None
+        if args.rnd:
+            self.rnd_worker = RND(env_params['obs'], name="sac")
 
         # if use gpu
         if self.args.cuda:
@@ -251,8 +257,6 @@ class sac_agent:
         # start to do the update
         obs_norm = self.o_norm.normalize(transitions['obs'])
         g_norm = self.g_norm.normalize(transitions['g'])
-        # obs_norm = transitions['obs']
-        # g_norm = transitions['g']
         inputs_norm = np.concatenate([obs_norm, g_norm], axis=1)
         obs_next_norm = self.o_norm.normalize(transitions['obs_next'])
         g_next_norm = self.g_norm.normalize(transitions['g_next'])
@@ -264,13 +268,20 @@ class sac_agent:
         inputs_norm_tensor = torch.tensor(inputs_norm, dtype=torch.float32)
         inputs_next_norm_tensor = torch.tensor(inputs_next_norm, dtype=torch.float32)
         actions_tensor = torch.tensor(transitions['actions'], dtype=torch.float32)
-        r_tensor = torch.tensor(transitions['r'], dtype=torch.float32) 
-        
+        r_tensor = torch.tensor(transitions['r'], dtype=torch.float32)
+        obs_norm_tensor = torch.tensor(obs_norm, dtype=torch.float32)
+        obs_next_norm_tensor = torch.tensor(obs_next_norm, dtype=torch.float32)
+
         if self.args.cuda:
+            obs_norm_tensor = obs_norm_tensor.cuda()
+            obs_next_norm_tensor = obs_next_norm_tensor.cuda()
             inputs_norm_tensor = inputs_norm_tensor.cuda()
             inputs_next_norm_tensor = inputs_next_norm_tensor.cuda()
             actions_tensor = actions_tensor.cuda()
             r_tensor = r_tensor.cuda()
+
+        self.rnd_worker.train(obs_norm_tensor)
+        intrinsic_reward = self.rnd_worker.get_intrinsic_reward(obs_next_norm_tensor)
 
         pis = self.actor_network(inputs_norm_tensor)
         actions_info = get_action_info(pis, cuda=self.args.cuda)
@@ -288,7 +299,7 @@ class sac_agent:
 
         # calculate the actor loss
         q_actions_ = torch.min(self.critic1(inputs_norm_tensor, actions_), self.critic2(inputs_norm_tensor, actions_))
-        actor_loss = (alpha * log_prob - q_actions_).mean()
+        actor_loss = (alpha * log_prob - q_actions_ - intrinsic_reward).mean()
         # actor_loss = (- q_actions_).mean()
 
         #Calculate the critic loss
