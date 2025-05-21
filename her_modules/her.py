@@ -39,8 +39,8 @@ class her_sampler:
             dist = np.linalg.norm(transitions['ag_next'] -  transitions['g'],axis=1)
             
             r = dist.copy()
-            r[dist < 0.05] = 0
-            r[dist >= 0.05] = -1
+            r[dist < 0.05] = 1
+            r[dist >= 0.05] = 0
 
             r = r.reshape(-1,1)
             transitions['r'] = r
