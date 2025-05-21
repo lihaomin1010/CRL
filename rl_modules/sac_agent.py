@@ -284,8 +284,7 @@ class sac_agent:
             self.rnd_worker.train(obs_norm_tensor)
             intrinsic_reward = self.rnd_worker.get_intrinsic_reward(obs_next_norm_tensor)
             thre = max(torch.abs(intrinsic_reward))
-            for i in range(r_tensor.shape[0]):
-                r_tensor[i] += self.args.rnd_num * intrinsic_reward[i] / thre
+            r_tensor += self.args.rnd_num * intrinsic_reward / thre
 
         pis = self.actor_network(inputs_norm_tensor)
         actions_info = get_action_info(pis, cuda=self.args.cuda)
@@ -317,8 +316,8 @@ class sac_agent:
             log_prob_next = actions_info_next.get_log_prob(actions_next_, pre_tanh_value_next)
             
             target_q_value_next = torch.min(self.critic_target_network1(inputs_next_norm_tensor, actions_next_), self.critic_target_network2(inputs_next_norm_tensor, actions_next_)) - alpha * log_prob_next
-            #target_q_value = r_tensor + self.args.gamma * target_q_value_next
-            target_q_value = r_tensor + target_q_value_next
+            target_q_value = r_tensor + self.args.gamma * target_q_value_next
+            #target_q_value = r_tensor + target_q_value_next
 
         qf1_loss = (q1_value - target_q_value).pow(2).mean()
         qf2_loss = (q2_value - target_q_value).pow(2).mean()
