@@ -303,7 +303,7 @@ class sac_agent:
 
         # calculate the actor loss
         q_actions_ = torch.min(self.critic1(inputs_norm_tensor, actions_), self.critic2(inputs_norm_tensor, actions_))
-        actor_loss = (alpha * log_prob - q_actions_ - intrinsic_reward).mean()
+        actor_loss = (alpha * log_prob - q_actions_).mean()
         # actor_loss = (- q_actions_).mean()
 
         #Calculate the critic loss
