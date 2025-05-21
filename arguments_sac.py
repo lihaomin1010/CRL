@@ -49,7 +49,7 @@ def get_args():
     parser.add_argument('--num_bc_demos', type=int, default=5, help='the number of expert demos to train the agent for RLfD')
 
     parser.add_argument('--rnd', type=bool, default=False, help='use rnd')
-
+    parser.add_argument('--rnd_num', type=float, default=0.5, help='rnd num')
     args = parser.parse_args()
 
     return args

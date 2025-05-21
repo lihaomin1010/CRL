@@ -280,8 +280,12 @@ class sac_agent:
             actions_tensor = actions_tensor.cuda()
             r_tensor = r_tensor.cuda()
 
-        self.rnd_worker.train(obs_norm_tensor)
-        intrinsic_reward = self.rnd_worker.get_intrinsic_reward(obs_next_norm_tensor)
+        if self.args.rnd:
+            self.rnd_worker.train(obs_norm_tensor)
+            intrinsic_reward = self.rnd_worker.get_intrinsic_reward(obs_next_norm_tensor)
+            thre = max(torch.abs(intrinsic_reward))
+            for i in range(r_tensor.shape[0]):
+                r_tensor[i] += self.args.rnd_num * intrinsic_reward[i] / thre
 
         pis = self.actor_network(inputs_norm_tensor)
         actions_info = get_action_info(pis, cuda=self.args.cuda)
