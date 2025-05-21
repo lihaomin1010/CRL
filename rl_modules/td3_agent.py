@@ -271,6 +271,9 @@ class td3_agent:
         if self.args.rnd:
             self.rnd_worker.train(obs_norm_tensor)
             intrinsic_reward = self.rnd_worker.get_intrinsic_reward(obs_next_norm_tensor)
+            thre = max(torch.abs(intrinsic_reward))
+            for i in range(r_tensor.shape[0]):
+                r_tensor[i] += 0.5 * intrinsic_reward[i] / thre
 
         # calculate the target Q value function
         with torch.no_grad():
@@ -286,8 +289,6 @@ class td3_agent:
             q_next_value = q_next_value.detach()
             #target_q_value = r_tensor + self.args.gamma * q_next_value
             target_q_value = r_tensor  + q_next_value
-            if self.args.rnd:
-                target_q_value = target_q_value + intrinsic_reward
             target_q_value = target_q_value.detach()
             
         
