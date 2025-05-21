@@ -51,7 +51,7 @@ class sac_agent:
 
         self.rnd_worker = None
         if args.rnd:
-            self.rnd_worker = RND(env_params['obs'], name="sac")
+            self.rnd_worker = RND(2*env_params['obs'], name="sac")
 
         # if use gpu
         if self.args.cuda:
@@ -281,8 +281,8 @@ class sac_agent:
             r_tensor = r_tensor.cuda()
 
         if self.args.rnd:
-            self.rnd_worker.train(obs_norm_tensor)
-            intrinsic_reward = self.rnd_worker.get_intrinsic_reward(obs_next_norm_tensor)
+            self.rnd_worker.train(inputs_norm_tensor)
+            intrinsic_reward = self.rnd_worker.get_intrinsic_reward(inputs_next_norm_tensor)
             thre = max(torch.abs(intrinsic_reward))
             r_tensor += self.args.rnd_num * intrinsic_reward / thre
 
