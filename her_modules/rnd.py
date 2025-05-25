@@ -26,7 +26,7 @@ def create_nn(input_num, output_num, init_val=0.001, relu=True, trainable=True, 
 
 
 class RND:
-    def __init__(self, s_features, out_features=3, name="", learning_rate=0.001):
+    def __init__(self, s_features, out_features, name="", learning_rate=0.001):
         self.s_features = s_features
         self.out_features = out_features
         self.lr = learning_rate
@@ -42,43 +42,35 @@ class RND:
         ).to(self.device)
 
         # 创建目标网络
-        self.target_net = nn.Sequential(
-            create_nn(self.s_features, 64, init_val=10, relu=True, trainable=False, name='l1'),
-            create_nn(64, self.out_features, init_val=10, relu=False, trainable=False, name='output')
-        ).to(self.device)
+        # self.target_net = nn.Sequential(
+        #     create_nn(self.s_features, 64, init_val=10, relu=True, trainable=False, name='l1'),
+        #     create_nn(64, self.out_features, init_val=10, relu=False, trainable=False, name='output')
+        # ).to(self.device)
 
         # 优化器
         self.optimizer = optim.Adam(self.train_net.parameters(), lr=self.lr)
 
-    def train(self, state):
+    def train(self, input_tensor, target_tensor):
 
         # 前向传播
-        train_output = self.train_net(state)
-        with torch.no_grad():
-            target_output = self.target_net(state)
-
+        train_output = self.train_net(input_tensor)
         # 计算损失
-        loss = torch.mean((train_output - target_output) ** 2)
+        reward = torch.mean((train_output - target_tensor) ** 2, dim=1)
 
+        loss = torch.mean(reward)
         # 反向传播
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-        return loss.item()
+        return loss.item(), reward.reshape((-1, 1))
 
-    def get_intrinsic_reward(self, state):
+    def get_intrinsic_reward(self, input_tensor, target_tensor):
         with torch.no_grad():
-            train_output = self.train_net(state)
-            target_output = self.target_net(state)
-            reward = torch.mean((train_output - target_output) ** 2, dim=1)
+            train_output = self.train_net(input_tensor)
+            reward = torch.mean((train_output - target_tensor) ** 2, dim=1)
         return reward.reshape((-1, 1))
 
-    def get_target(self, state):
-        state = torch.FloatTensor(state).to(self.device)
-        with torch.no_grad():
-            target_output = self.target_net(state)
-        return target_output.cpu().numpy()
 
 
 

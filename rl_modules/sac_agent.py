@@ -51,7 +51,7 @@ class sac_agent:
 
         self.rnd_worker = None
         if args.rnd:
-            self.rnd_worker = RND(2*env_params['obs'], name="sac")
+            self.rnd_worker = RND(env_params['obs'] + env_params['action'], env_params['obs'], name="sac")
 
         # if use gpu
         if self.args.cuda:
@@ -258,6 +258,7 @@ class sac_agent:
         obs_norm = self.o_norm.normalize(transitions['obs'])
         g_norm = self.g_norm.normalize(transitions['g'])
         inputs_norm = np.concatenate([obs_norm, g_norm], axis=1)
+        rnd_inputs_norm = np.concatenate([obs_norm, transitions['actions']], axis=1)
         obs_next_norm = self.o_norm.normalize(transitions['obs_next'])
         g_next_norm = self.g_norm.normalize(transitions['g_next'])
         # obs_next_norm = transitions['obs_next']
@@ -267,6 +268,7 @@ class sac_agent:
         # transfer them into the tensor
         inputs_norm_tensor = torch.tensor(inputs_norm, dtype=torch.float32)
         inputs_next_norm_tensor = torch.tensor(inputs_next_norm, dtype=torch.float32)
+        rnd_inputs_norm_tensor = torch.tensor(rnd_inputs_norm, dtype=torch.float32)
         actions_tensor = torch.tensor(transitions['actions'], dtype=torch.float32)
         r_tensor = torch.tensor(transitions['r'], dtype=torch.float32)
         obs_norm_tensor = torch.tensor(obs_norm, dtype=torch.float32)
@@ -274,6 +276,7 @@ class sac_agent:
 
         if self.args.cuda:
             obs_norm_tensor = obs_norm_tensor.cuda()
+            rnd_inputs_norm_tensor = rnd_inputs_norm_tensor.cuda()
             obs_next_norm_tensor = obs_next_norm_tensor.cuda()
             inputs_norm_tensor = inputs_norm_tensor.cuda()
             inputs_next_norm_tensor = inputs_next_norm_tensor.cuda()
@@ -281,9 +284,9 @@ class sac_agent:
             r_tensor = r_tensor.cuda()
 
         if self.args.rnd:
-            self.rnd_worker.train(inputs_norm_tensor)
-            intrinsic_reward = self.rnd_worker.get_intrinsic_reward(inputs_next_norm_tensor)
-            thre = max(torch.abs(intrinsic_reward))
+            _, intrinsic_reward = self.rnd_worker.train(rnd_inputs_norm_tensor, obs_next_norm_tensor)
+            #intrinsic_reward = self.rnd_worker.get_intrinsic_reward(inputs_next_norm_tensor, obs_next_norm_tensor)
+            thre = torch.max(torch.abs(intrinsic_reward))
             r_tensor += self.args.rnd_num * intrinsic_reward / thre
 
         pis = self.actor_network(inputs_norm_tensor)
