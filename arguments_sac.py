@@ -50,6 +50,10 @@ def get_args():
 
     parser.add_argument('--rnd', type=bool, default=False, help='use rnd')
     parser.add_argument('--rnd_num', type=float, default=0.5, help='rnd num')
+
+    parser.add_argument('--crl', type=bool, default=False, help='use crl')
+
+    parser.add_argument('--entropy-temp', type=float, default=0.5, help='the entropy temperature')
     args = parser.parse_args()
 
     return args

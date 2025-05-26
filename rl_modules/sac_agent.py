@@ -11,7 +11,7 @@ from mpi_utils.normalizer import normalizer
 from her_modules.her import her_sampler
 from her_modules.rnd import RND
 from her_modules.normalize import Normalizer
-
+from her_modules.skill_entropy import CRL
 import wandb
 
 
@@ -48,10 +48,17 @@ class sac_agent:
         self.target_entropy = -1 * env_params['action']
         # self.target_entropy = 0
         self.log_alpha = torch.zeros(1, requires_grad=True)
+        self.log_beta = torch.zeros(1, requires_grad=True)
+
+        self.entropy_temp = args.entropy_temp
 
         self.rnd_worker = None
         if args.rnd:
             self.rnd_worker = RND(env_params['obs'] + env_params['action'], env_params['obs'], name="sac")
+
+        self.crl_worker = None
+        if args.crl:
+            self.crl_worker = CRL(env_params['obs'] + env_params['action'], 4, buffer_size=10000, n_updates=4)
 
         # if use gpu
         if self.args.cuda:
@@ -63,13 +70,16 @@ class sac_agent:
             self.actor_target_network.cuda()
             self.log_alpha.cuda()
             self.log_alpha = torch.zeros(1, requires_grad=True, device='cuda')
+            self.log_beta.cuda()
+            self.log_beta = torch.zeros(1, requires_grad=True, device='cuda')
         
         # create the optimizer
         self.actor_optim = torch.optim.Adam(self.actor_network.parameters(), lr=self.args.lr_actor)
         self.critic_optim1 = torch.optim.Adam(self.critic1.parameters(), lr=self.args.lr_critic)
         self.critic_optim2 = torch.optim.Adam(self.critic2.parameters(), lr=self.args.lr_critic)
         self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=self.args.lr_actor)
-        
+        self.beta_optim = torch.optim.Adam([self.log_beta], lr=self.args.lr_actor)
+
         # her sampler
         # self.her_module = her_sampler(self.args.replay_strategy, self.args.replay_k, self.env.compute_reward)
         self.her_module = her_sampler(self.args.replay_strategy, self.args.replay_k)
@@ -287,7 +297,19 @@ class sac_agent:
             _, intrinsic_reward = self.rnd_worker.train(rnd_inputs_norm_tensor, obs_next_norm_tensor)
             #intrinsic_reward = self.rnd_worker.get_intrinsic_reward(inputs_next_norm_tensor, obs_next_norm_tensor)
             thre = torch.max(torch.abs(intrinsic_reward))
-            r_tensor += self.args.rnd_num * intrinsic_reward / thre
+            intrinsic_reward = intrinsic_reward/thre
+            r_tensor += self.args.rnd_num * intrinsic_reward
+
+            if self.args.crl:
+                _ = self.crl_worker.train(rnd_inputs_norm_tensor, intrinsic_reward.detach())
+
+                skill_entorpy = self.crl_worker.get_skill_entropy(torch.concatenate((obs_norm_tensor, actions_tensor), dim=1))
+                beta_loss = -(self.log_beta * ((self.target_entropy - skill_entorpy).detach())).mean()
+                self.beta_optim.zero_grad()
+                beta_loss.backward()
+                # sync_parameter(self.log_alpha)
+                self.beta_optim.step()
+
 
         pis = self.actor_network(inputs_norm_tensor)
         actions_info = get_action_info(pis, cuda=self.args.cuda)
@@ -303,6 +325,7 @@ class sac_agent:
 
         alpha = self.log_alpha.exp()
 
+
         # calculate the actor loss
         q_actions_ = torch.min(self.critic1(inputs_norm_tensor, actions_), self.critic2(inputs_norm_tensor, actions_))
         actor_loss = (alpha * log_prob - q_actions_).mean()
@@ -317,8 +340,13 @@ class sac_agent:
             actions_info_next = get_action_info(pis_next, cuda=self.args.cuda)
             actions_next_, pre_tanh_value_next = actions_info_next.select_actions(reparameterize=True)
             log_prob_next = actions_info_next.get_log_prob(actions_next_, pre_tanh_value_next)
-            
-            target_q_value_next = torch.min(self.critic_target_network1(inputs_next_norm_tensor, actions_next_), self.critic_target_network2(inputs_next_norm_tensor, actions_next_)) - alpha * log_prob_next
+
+            target_q_value_next = torch.min(self.critic_target_network1(inputs_next_norm_tensor, actions_next_), self.critic_target_network2(inputs_next_norm_tensor, actions_next_)) - self.entropy_temp* alpha * log_prob_next
+
+            if self.args.crl:
+                beta = self.log_beta.exp()
+                target_q_value_next = target_q_value_next + self.entropy_temp * beta * skill_entorpy
+
             target_q_value = r_tensor + self.args.gamma * target_q_value_next
             #target_q_value = r_tensor + target_q_value_next
 
