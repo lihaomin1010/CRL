@@ -101,13 +101,3 @@ class CRL:
         dist = torch.einsum("ik,jk->ij", x, x)
 
         return dist.mean(dim=1).unsqueeze(1)
-
-
-
-
-
-
-
-
-
-

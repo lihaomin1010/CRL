@@ -12,7 +12,6 @@ def get_args():
     parser.add_argument('--n-epochs', type=int, default=50, help='the number of epochs to train the agent')
     parser.add_argument('--n-cycles', type=int, default=50, help='the times to collect samples per epoch')
     parser.add_argument('--n-batches', type=int, default=40, help='the times to update the network')
-    parser.add_argument('--save-interval', type=int, default=5, help='the interval that save the trajectory')
     parser.add_argument('--seed', type=int, default=123, help='random seed')
     parser.add_argument('--num-workers', type=int, default=1, help='the number of cpus to collect samples')
     parser.add_argument('--replay-strategy', type=str, default='future', help='the HER strategy')
@@ -54,6 +53,10 @@ def get_args():
     parser.add_argument('--crl', type=bool, default=False, help='use crl')
 
     parser.add_argument('--entropy-temp', type=float, default=0.5, help='the entropy temperature')
+
+    parser.add_argument('--save-interval', type=int, default=10, help='the interval of saving the model')
+    parser.add_argument('--save-path', type=str, default='checkpoints', help='the path to save the models')
+    parser.add_argument('--load-path', type=str, default='', help='the path to load the models')
     args = parser.parse_args()
 
     return args

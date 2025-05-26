@@ -567,6 +567,8 @@ def launch(args):
     env_params = get_env_params(env,max_episode_steps)
     # create the sac agent to interact with the environment 
     sac_trainer = sac_agent(args, env, env_params)
+    if args.load_path != "":
+        sac_trainer.load_checkpoint(args.load_path)
     sac_trainer.learn()
 
 

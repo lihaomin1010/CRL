@@ -123,6 +123,7 @@ class sac_agent:
         train the network
 
         """
+        t_begin = datetime.now().timestamp()
         # start to collect samples
         for epoch in range(self.args.n_epochs):
             for _ in range(self.args.n_cycles):
@@ -190,6 +191,9 @@ class sac_agent:
                 # store the episodes
                 self.buffer.store_episode([mb_obs, mb_ag, mb_g, mb_actions])
                 self._update_normalizer([mb_obs, mb_ag, mb_g, mb_actions])
+
+            if (epoch+1) % self.args.save_interval == 0:
+                self.save_checkpoint(f"{self.args.save_path}/{t_begin}/{epoch+1}")
                 
             
             # start to do the evaluation
@@ -405,3 +409,81 @@ class sac_agent:
 
         wandb.log({"Evaluated Reward": local_success_rate}, step=self.timesteps)
         return local_success_rate
+
+    def save_checkpoint(self, path):
+        if not os.path.exists(path):
+            os.makedirs(path)
+        """
+        保存模型检查点到指定路径
+        
+        Args:
+            path (str): 保存检查点的路径
+        """
+        checkpoint = {
+            'actor_network': self.actor_network.state_dict(),
+            'critic1': self.critic1.state_dict(),
+            'critic2': self.critic2.state_dict(),
+            'actor_target_network': self.actor_target_network.state_dict(),
+            'critic_target_network1': self.critic_target_network1.state_dict(),
+            'critic_target_network2': self.critic_target_network2.state_dict(),
+            'actor_optim': self.actor_optim.state_dict(),
+            'critic_optim1': self.critic_optim1.state_dict(),
+            'critic_optim2': self.critic_optim2.state_dict(),
+            'alpha_optim': self.alpha_optim.state_dict(),
+            'beta_optim': self.beta_optim.state_dict(),
+            'log_alpha': self.log_alpha,
+            'log_beta': self.log_beta,
+        }
+        
+        if self.args.rnd and self.rnd_worker is not None:
+            checkpoint['rnd_worker'] = self.rnd_worker.train_net.state_dict()
+            checkpoint['rnd_worker_optim'] = self.rnd_worker.optimizer.state_dict()
+        if self.args.crl and self.crl_worker is not None:
+            checkpoint['crl_worker'] = self.crl_worker.train_net.state_dict()
+            checkpoint['crl_worker_optim'] = self.crl_worker.optimizer.state_dict()
+
+            
+        torch.save(checkpoint, f"{path}/checkpoint.pth")
+        print(f"检查点已保存到: {path}")
+
+    def load_checkpoint(self, path):
+        """
+        从指定路径加载模型检查点
+        
+        Args:
+            path (str): 加载检查点的路径
+        """
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"找不到检查点文件: {path}")
+            
+        checkpoint = torch.load(path)
+        
+        # 加载网络参数
+        self.actor_network.load_state_dict(checkpoint['actor_network'])
+        self.critic1.load_state_dict(checkpoint['critic1'])
+        self.critic2.load_state_dict(checkpoint['critic2'])
+        self.actor_target_network.load_state_dict(checkpoint['actor_target_network'])
+        self.critic_target_network1.load_state_dict(checkpoint['critic_target_network1'])
+        self.critic_target_network2.load_state_dict(checkpoint['critic_target_network2'])
+        
+        # 加载优化器状态
+        self.actor_optim.load_state_dict(checkpoint['actor_optim'])
+        self.critic_optim1.load_state_dict(checkpoint['critic_optim1'])
+        self.critic_optim2.load_state_dict(checkpoint['critic_optim2'])
+        self.alpha_optim.load_state_dict(checkpoint['alpha_optim'])
+        self.beta_optim.load_state_dict(checkpoint['beta_optim'])
+        
+        # 加载其他参数
+        self.log_alpha = checkpoint['log_alpha']
+        self.log_beta = checkpoint['log_beta']
+        
+        # 加载RND和CRL（如果存在）
+        if self.args.rnd and self.rnd_worker is not None and 'rnd_worker' in checkpoint:
+            self.rnd_worker.train_net.load_state_dict(checkpoint['rnd_worker'])
+            self.rnd_worker.optimizer.load_state_dict(checkpoint['rnd_worker_optim'])
+            
+        if self.args.crl and self.crl_worker is not None and 'crl_worker' in checkpoint:
+            self.crl_worker.train_net.load_state_dict(checkpoint['crl_worker'])
+            self.crl_worker.optimizer.load_state_dict(checkpoint['crl_worker_optim'])
+            
+        print(f"已从 {path} 加载检查点")
