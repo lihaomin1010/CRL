@@ -29,7 +29,7 @@ class CRL:
         self.lr = learning_rate
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.train_net = CNet(s_features, out_features).to(self.device)
+        self.train_net = CNet(s_features * 2, out_features).to(self.device)
 
         self.n_updates = n_updates  # 每次train时的更新次数
         self.replay_buffer = ReplayBuffer(max_size=buffer_size)
@@ -57,31 +57,36 @@ class CRL:
 
             batch_input, scores, indices = batch
 
+            r_t = torch.rand(batch_input.shape).to(self.device)
+            batch_input_1 = torch.cat([batch_input, r_t],dim=2)
+
+            r_t = torch.rand(batch_input.shape).to(self.device)
+            batch_input_2 = torch.cat([batch_input, r_t],dim=2)
+
             scores_weight =  (scores - scores.transpose(1,2)).pow(2)
+            scores_weight = scores_weight / scores_weight.max()
+
             scores_dim = scores.squeeze(dim=2)
             scores_dis = scores_dim.max(dim=1).values - scores_dim.min(dim=1).values
             # 前向传播
-            x = self.train_net(batch_input)
+            x_1 = self.train_net(batch_input_1)
+            x_2 = self.train_net(batch_input_2)
 
-            x_norm = (x ** 2).sum(dim=2, keepdim=True)  # (X, Y, 1)
-
-            # 计算 pairwise distance 的平方
-            dist_sq = x_norm - 2 * torch.matmul(x, x.transpose(1, 2)) + x_norm.transpose(1, 2)  # (X, Y, Y)
-
-            # 由于数值误差，可能出现负值，使用 relu 或 clamp 保证开方合法;同时距离越大，相似度越低,sim越接近0
-            sim = torch.exp(-torch.sqrt(torch.clamp(dist_sq, min=1e-12)))
+            sim = torch.einsum('xyz, xwz -> xyw', x_1, x_2)
+            sim = torch.sigmoid(sim*5)
 
             I = torch.eye(sim.shape[1], device=self.device).unsqueeze(0).expand(sim.shape[0], -1, -1)
 
             loss = scores_weight*torch.pow(sim-I, 2)
 
-            loss = torch.sum(scores_dis*torch.mean(loss, dim=(1,2))).mean()
+            #loss = torch.sum(scores_dis*torch.mean(loss, dim=(1,2))).mean()
+            loss = torch.sum(torch.mean(loss, dim=(1, 2))).mean()
+
 
             # 反向传播
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-
 
             total_loss += loss.item()
 
@@ -89,10 +94,12 @@ class CRL:
 
 
     def get_skill_entropy(self, input_tensor):
-        x = self.train_net(input_tensor)
-        x_norm = (x ** 2).sum(dim=1, keepdim=True)  # (X, 1)
-        dist_sq = x_norm - 2 * x @ x.T + x_norm.T  # (X, X)
-        dist = torch.sqrt(torch.clamp(dist_sq, min=1e-12))
+        r_t = torch.rand(input_tensor.shape).to(self.device)
+        input = torch.cat([input_tensor, r_t],dim=1).to(self.device)
+        x = self.train_net(input)
+
+        dist = torch.einsum("ik,jk->ij", x, x)
+
         return dist.mean(dim=1).unsqueeze(1)
 
 

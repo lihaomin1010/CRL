@@ -294,17 +294,18 @@ class sac_agent:
             r_tensor = r_tensor.cuda()
 
         if self.args.rnd:
-            _, intrinsic_reward = self.rnd_worker.train(rnd_inputs_norm_tensor, obs_next_norm_tensor)
+            _, intrinsic_reward_origin = self.rnd_worker.train(rnd_inputs_norm_tensor, obs_next_norm_tensor)
             #intrinsic_reward = self.rnd_worker.get_intrinsic_reward(inputs_next_norm_tensor, obs_next_norm_tensor)
-            thre = torch.max(torch.abs(intrinsic_reward))
-            intrinsic_reward = intrinsic_reward/thre
+            thre = torch.max(torch.abs(intrinsic_reward_origin))
+            intrinsic_reward = intrinsic_reward_origin/thre
             r_tensor += self.args.rnd_num * intrinsic_reward
 
+            skill_entropy = None
             if self.args.crl:
+                #_ = self.crl_worker.train(rnd_inputs_norm_tensor, intrinsic_reward.detach())
                 _ = self.crl_worker.train(rnd_inputs_norm_tensor, intrinsic_reward.detach())
-
-                skill_entorpy = self.crl_worker.get_skill_entropy(torch.concatenate((obs_norm_tensor, actions_tensor), dim=1))
-                beta_loss = -(self.log_beta * ((self.target_entropy - skill_entorpy).detach())).mean()
+                skill_entropy = self.crl_worker.get_skill_entropy(torch.concatenate((obs_norm_tensor, actions_tensor), dim=1))
+                beta_loss = -(self.log_beta * ((self.target_entropy - skill_entropy).detach())).mean()
                 self.beta_optim.zero_grad()
                 beta_loss.backward()
                 # sync_parameter(self.log_alpha)
@@ -325,10 +326,13 @@ class sac_agent:
 
         alpha = self.log_alpha.exp()
 
+        beta = self.log_beta.exp()
 
         # calculate the actor loss
         q_actions_ = torch.min(self.critic1(inputs_norm_tensor, actions_), self.critic2(inputs_norm_tensor, actions_))
-        actor_loss = (alpha * log_prob - q_actions_).mean()
+        actor_loss = ( self.entropy_temp*alpha * log_prob - q_actions_).mean()
+        if self.args.crl:
+            actor_loss = actor_loss + self.entropy_temp * beta * skill_entropy.mean()
         # actor_loss = (- q_actions_).mean()
 
         #Calculate the critic loss
@@ -344,8 +348,7 @@ class sac_agent:
             target_q_value_next = torch.min(self.critic_target_network1(inputs_next_norm_tensor, actions_next_), self.critic_target_network2(inputs_next_norm_tensor, actions_next_)) - self.entropy_temp* alpha * log_prob_next
 
             if self.args.crl:
-                beta = self.log_beta.exp()
-                target_q_value_next = target_q_value_next + self.entropy_temp * beta * skill_entorpy
+                target_q_value_next = target_q_value_next - self.entropy_temp * beta * skill_entropy
 
             target_q_value = r_tensor + self.args.gamma * target_q_value_next
             #target_q_value = r_tensor + target_q_value_next
