@@ -51,7 +51,7 @@ class sac_agent:
         self.log_beta = torch.zeros(1, requires_grad=True)
 
         self.entropy_temp = args.entropy_temp
-
+        self.steps = 0
         self.rnd_worker = None
         if args.rnd:
             self.rnd_worker = RND(env_params['obs'] + env_params['action'], env_params['obs'], name="sac")
@@ -91,7 +91,7 @@ class sac_agent:
         self.o_norm = normalizer(size=env_params['obs'], default_clip_range=self.args.clip_range)
         self.g_norm = normalizer(size=env_params['goal'], default_clip_range=self.args.clip_range)
 
-        wandb.login()
+        #wandb.login()
         
         config={
                 "learning_rate": args.lr_actor,
@@ -102,11 +102,11 @@ class sac_agent:
             }
         config.update(args.__dict__)
 
-        run = wandb.init(
-            project="Equi_Contrastive_RL",
-            config = config,
-            mode = "disabled" if args.disable_wandb else "online",
-        )
+        # run = wandb.init(
+        #     project="Equi_Contrastive_RL",
+        #     config = config,
+        #     mode = "disabled" if args.disable_wandb else "online",
+        # )
 
     
     def process_obs(self, obs):
@@ -119,6 +119,8 @@ class sac_agent:
 
 
     def learn(self):
+
+        self.visualize_trajectories("saved_models/evaluation_trajectories/test.npy")
         """
         train the network
 
@@ -152,7 +154,9 @@ class sac_agent:
                             for _ in range(self.args.n_updates):
                                 # train the network
                                 self._update_network()
-                            
+                                self.steps += 1
+                                if (self.steps + 1) % self.args.record_interval == 0:
+                                    wandb.log({"log_alpha": self.log_alpha}, step=self.steps+1)
                             self.grad_updates += self.args.n_updates
                             
                             # soft update
@@ -407,7 +411,7 @@ class sac_agent:
         local_success_rate = np.mean(total_success_rate)
 
 
-        wandb.log({"Evaluated Reward": local_success_rate}, step=self.timesteps)
+        wandb.log({"Evaluated Reward": local_success_rate}, step=self.steps)
         return local_success_rate
 
     def save_checkpoint(self, path):
@@ -487,3 +491,69 @@ class sac_agent:
             self.crl_worker.optimizer.load_state_dict(checkpoint['crl_worker_optim'])
             
         print(f"已从 {path} 加载检查点")
+
+    def visualize_trajectories(self, trajectory_file):
+        """
+        读取轨迹数据并进行可视化
+        Args:
+            trajectory_file: 轨迹数据文件路径
+        """
+        import matplotlib.pyplot as plt
+        from sklearn.manifold import TSNE
+        import numpy as np
+
+        # 读取轨迹数据
+        trajectories = np.load(trajectory_file, allow_pickle=True)
+
+        # 收集所有observations和actions
+        all_obs_actions = []
+        all_distances = []
+
+        for traj in trajectories:
+            obs = traj['observations']
+            actions = traj['actions']
+            achieved_goals = traj['achieved_goals']
+
+            # 计算每个时间步的欧氏距离
+            distances = np.linalg.norm(obs[:, 3:6] - achieved_goals[:, 3:6], axis=1)
+
+            # 拼接observations和actions
+            obs_actions = np.concatenate([obs, actions], axis=1)
+
+            all_obs_actions.append(obs_actions)
+            all_distances.append(distances)
+
+        # 将所有数据合并
+        all_obs_actions = np.concatenate(all_obs_actions, axis=0)
+        all_distances = np.concatenate(all_distances, axis=0)
+
+        all_obs_actions_tensor = torch.tensor(all_obs_actions).cuda()
+        r_t = torch.rand(all_obs_actions_tensor.shape).cuda()
+        input_tensor = torch.cat([all_obs_actions_tensor, r_t],dim=1)
+
+        # 使用process_handle处理数据
+        processed_data = self.crl_worker.train_net(input_tensor)
+
+        # 使用t-SNE进行降维
+        tsne = TSNE(n_components=2, random_state=42)
+        reduced_data = tsne.fit_transform(processed_data.detach().cpu().numpy())
+
+        # 创建散点图
+        plt.figure(figsize=(10, 8))
+        scatter = plt.scatter(reduced_data[:, 0], reduced_data[:, 1],
+                              c=all_distances,
+                              cmap='viridis',
+                              alpha=0.6)
+        plt.colorbar(scatter, label='Distance between observation and achieved goal')
+        plt.title('t-SNE visualization of trajectories')
+        plt.xlabel('t-SNE dimension 1')
+        plt.ylabel('t-SNE dimension 2')
+
+        # 保存图像
+        save_dir = os.path.join(self.args.save_dir, 'visualizations')
+        os.makedirs(save_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        plt.savefig(os.path.join(save_dir, f'tsne_visualization_{timestamp}.png'))
+        plt.close()
+
+        print(f'[INFO] 可视化结果已保存到: {save_dir}')

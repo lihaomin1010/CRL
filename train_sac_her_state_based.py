@@ -1,4 +1,5 @@
 import gym
+import wandb
 from gym import spaces
 from gym.vector import AsyncVectorEnv
 from gym.envs.robotics.fetch import push
@@ -540,6 +541,14 @@ def get_env_params(env,max_episode_steps):
 
 
 def launch(args):
+    wandb.init(project=f"sac-{args.env_name}",
+               name=f"seed-{args.seed}_rnd-{args.rnd}_skill-{args.crl}",
+               config={
+                   "env_name": args.env_name,
+                   "rnd": args.rnd,
+                   "skill": args.crl,
+               })
+    print(wandb.run)
     if args.seed == 123:
       seed  = np.random.randint(0,10000)
     else:

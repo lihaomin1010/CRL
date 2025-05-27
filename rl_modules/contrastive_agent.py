@@ -203,7 +203,11 @@ class contrastive_agent:
                     self.grad_updates,
                 )
             )
-
+            
+            # 每10个epoch保存一次检查点
+            if (epoch + 1) % self.args.save_interval == 0:
+                self.save_checkpoint(epoch + 1)
+        self.final_eval_agent()
 
     # pre_process the inputs
     def _preproc_inputs(self, obs, g):
@@ -403,3 +407,138 @@ class contrastive_agent:
         success_rate = np.mean(total_success_rate)
 
         return success_rate
+
+    def final_eval_agent(self):
+        total_success_rate = []
+        # 用于存储所有轨迹数据
+        all_trajectories = []
+        
+        for episode in range(100):
+            print(f"Episode {episode}")
+            per_success_rate = []
+            # 存储当前轨迹的数据
+            trajectory = {
+                'observations': [],
+                'actions': [],
+                'rewards': [],
+                'desired_goals': [],
+                'achieved_goals': []
+            }
+
+            # reset the environment
+            observation = self.env.reset()
+
+            observation = self.process_observation(observation)
+            obs = observation["observation"]
+            g = observation["desired_goal"]
+
+            for t in range(self.env_params["max_timesteps"]):
+                with torch.no_grad():
+                    input_tensor = self._preproc_inputs(obs, g)
+                    pi = self.actor_network(input_tensor)
+                    action = get_action_info(pi, cuda=self.args.cuda).select_actions(
+                        reparameterize=False, exploration=False
+                    )
+                    action = action.cpu().numpy()[0]
+                
+                # 保存当前步骤的数据
+                trajectory['observations'].append(obs.copy())
+                trajectory['actions'].append(action.copy())
+                
+                observation_new, reward, _, info = self.env.step(action)
+
+                observation_new = self.process_observation(observation_new)
+                obs = observation_new["observation"]
+                g = observation_new["desired_goal"]
+                ag = observation_new["achieved_goal"]
+
+                trajectory['achieved_goals'].append(ag.copy())
+                trajectory['rewards'].append(reward)
+                per_success_rate.append(bool(reward))
+
+                if reward == 1.0:
+                    break
+            
+            # 将列表转换为numpy数组
+            for key in trajectory:
+                trajectory[key] = np.array(trajectory[key])
+            
+            all_trajectories.append(trajectory)
+            total_success_rate.append(reward)
+        
+        total_success_rate = np.array(total_success_rate)
+        success_rate = np.mean(total_success_rate)
+        
+        # 创建保存目录
+        save_dir = os.path.join(self.args.save_dir, 'evaluation_trajectories')
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # 保存所有轨迹数据
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = os.path.join(save_dir, f'trajectories_{timestamp}.npy')
+        np.save(save_path, all_trajectories)
+        print(f'[INFO] 轨迹数据已保存到: {save_path}')
+        print(f'[INFO] 最终评估成功率: {success_rate:.3f}')
+        
+        return success_rate
+    
+    def save_checkpoint(self, epoch):
+        """
+        保存模型检查点
+        Args:
+            epoch: 当前训练轮数
+        """
+        checkpoint_dir = os.path.join(self.args.save_dir, 'checkpoints')
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        
+        checkpoint = {
+            'actor_state_dict': self.actor_network.state_dict(),
+            'critic_state_dict': self.critic1.state_dict(),
+            'actor_optimizer': self.actor_optim.state_dict(),
+            'critic_optimizer': self.critic_optim1.state_dict(),
+            'alpha_optimizer': self.alpha_optim.state_dict(),
+            'log_alpha': self.log_alpha,
+        }
+        
+        checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_epoch_{epoch}.pt')
+        torch.save(checkpoint, checkpoint_path)
+        print(f'[INFO] 保存检查点到 {checkpoint_path}')
+
+    def load_checkpoint(self, epoch):
+        """
+        加载模型检查点
+        Args:
+            epoch: 要加载的检查点对应的epoch数
+        Returns:
+            bool: 是否成功加载检查点
+        """
+        checkpoint_path = os.path.join(self.args.save_dir, 'checkpoints', f'checkpoint_epoch_{epoch}.pt')
+        
+        if not os.path.exists(checkpoint_path):
+            print(f'[WARNING] 检查点文件不存在: {checkpoint_path}')
+            return False
+            
+        try:
+            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+            
+            # 加载模型状态
+            self.actor_network.load_state_dict(checkpoint['actor_state_dict'])
+            self.critic1.load_state_dict(checkpoint['critic_state_dict'])
+            
+            # 加载优化器状态
+            self.actor_optim.load_state_dict(checkpoint['actor_optimizer'])
+            self.critic_optim1.load_state_dict(checkpoint['critic_optimizer'])
+            self.alpha_optim.load_state_dict(checkpoint['alpha_optimizer'])
+            
+            # 加载其他状态
+            self.log_alpha = checkpoint['log_alpha']
+            self.o_norm = checkpoint['o_norm']
+            self.g_norm = checkpoint['g_norm']
+            
+            print(f'[INFO] 成功加载检查点: {checkpoint_path}')
+            return True
+            
+        except Exception as e:
+            print(f'[ERROR] 加载检查点时发生错误: {str(e)}')
+            return False
+
