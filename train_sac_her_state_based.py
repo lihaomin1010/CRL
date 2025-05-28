@@ -374,6 +374,7 @@ class SawyerPush(metaworld.envs.mujoco.env_dict.ALL_V2_ENVIRONMENTS['push-v2']):
                goal_max_y=0.9):
     
     super(SawyerPush, self).__init__()
+    self.render_mode = 'rgb_array'
     self._random_reset_space.low[3] = goal_min_x
     self._random_reset_space.low[4] = goal_min_y
     self._random_reset_space.high[3] = goal_max_x
@@ -410,6 +411,7 @@ class SawyerPush(metaworld.envs.mujoco.env_dict.ALL_V2_ENVIRONMENTS['push-v2']):
   
   def step(self, action):
     obs = super(SawyerPush, self).step(action)
+    super(SawyerPush, self).render()
     dist = np.linalg.norm(self._target_pos - self._get_pos_objects())
     r = float(dist < 0.05)  # Taken from the metaworld code.
     return obs, r, False, {}

@@ -9,6 +9,9 @@ import metaworld
 import numpy as np
 import gym
 import os, sys
+
+from torch.onnx.symbolic_opset9 import constant_pad_nd
+
 from arguments_contrastive import get_args
 from mpi4py import MPI
 from rl_modules.contrastive_agent import contrastive_agent
@@ -569,6 +572,7 @@ def launch(args):
     
     # create the contrastive agent to interact with the environment 
     contrastive_trainer = contrastive_agent(args, env, env_params)
+    contrastive_trainer.load_checkpoint(200)
     contrastive_trainer.learn()
 
 

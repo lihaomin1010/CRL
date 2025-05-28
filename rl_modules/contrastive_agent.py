@@ -122,6 +122,9 @@ class contrastive_agent:
         train the network
 
         """
+        if True:
+            self.final_eval_agent_img()
+
         # start to collect samples
         for epoch in range(self.args.n_epochs):
             for _ in range(self.args.n_cycles):
@@ -481,7 +484,82 @@ class contrastive_agent:
         print(f'[INFO] 最终评估成功率: {success_rate:.3f}')
         
         return success_rate
-    
+
+    def final_eval_agent_img(self):
+        total_success_rate = []
+        # 用于存储所有轨迹数据
+        all_trajectories = []
+
+        for episode in range(100):
+            print(f"Episode {episode}")
+            per_success_rate = []
+            # 存储当前轨迹的数据
+            trajectory = {
+                'observations': [],
+                'actions': [],
+                'rewards': [],
+                'desired_goals': [],
+                'achieved_goals': []
+            }
+
+            #self.env.render_mode = 'rgb_array'
+            # reset the environment
+            observation = self.env.reset()
+            #image = env.render(mode='rgb_array', camera_name='topview')
+            image = self.env.render(offscreen=True)
+            observation = self.process_observation(observation)
+            obs = observation["observation"]
+            g = observation["desired_goal"]
+
+            for t in range(self.env_params["max_timesteps"]):
+                with torch.no_grad():
+                    input_tensor = self._preproc_inputs(obs, g)
+                    pi = self.actor_network(input_tensor)
+                    action = get_action_info(pi, cuda=self.args.cuda).select_actions(
+                        reparameterize=False, exploration=False
+                    )
+                    action = action.cpu().numpy()[0]
+
+                # 保存当前步骤的数据
+                trajectory['observations'].append(obs.copy())
+                trajectory['actions'].append(action.copy())
+
+                observation_new, reward, _, info = self.env.step(action)
+
+                observation_new = self.process_observation(observation_new)
+                obs = observation_new["observation"]
+                g = observation_new["desired_goal"]
+                ag = observation_new["achieved_goal"]
+
+                trajectory['achieved_goals'].append(ag.copy())
+                trajectory['rewards'].append(reward)
+                per_success_rate.append(bool(reward))
+
+                if reward == 1.0:
+                    break
+
+            # 将列表转换为numpy数组
+            for key in trajectory:
+                trajectory[key] = np.array(trajectory[key])
+
+            all_trajectories.append(trajectory)
+            total_success_rate.append(reward)
+
+        total_success_rate = np.array(total_success_rate)
+        success_rate = np.mean(total_success_rate)
+
+        # 创建保存目录
+        save_dir = os.path.join(self.args.save_dir, 'evaluation_trajectories')
+        os.makedirs(save_dir, exist_ok=True)
+
+        # 保存所有轨迹数据
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = os.path.join(save_dir, f'trajectories_{timestamp}.npy')
+        np.save(save_path, all_trajectories)
+        print(f'[INFO] 轨迹数据已保存到: {save_path}')
+        print(f'[INFO] 最终评估成功率: {success_rate:.3f}')
+
+        return success_rate
     def save_checkpoint(self, epoch):
         """
         保存模型检查点
@@ -512,7 +590,7 @@ class contrastive_agent:
         Returns:
             bool: 是否成功加载检查点
         """
-        checkpoint_path = os.path.join(self.args.save_dir, 'checkpoints', f'checkpoint_epoch_{epoch}.pt')
+        checkpoint_path = os.path.join('checkpoints', f'{epoch}.pt')
         
         if not os.path.exists(checkpoint_path):
             print(f'[WARNING] 检查点文件不存在: {checkpoint_path}')
@@ -532,8 +610,6 @@ class contrastive_agent:
             
             # 加载其他状态
             self.log_alpha = checkpoint['log_alpha']
-            self.o_norm = checkpoint['o_norm']
-            self.g_norm = checkpoint['g_norm']
             
             print(f'[INFO] 成功加载检查点: {checkpoint_path}')
             return True

@@ -119,8 +119,9 @@ class sac_agent:
 
 
     def learn(self):
-
-        self.visualize_trajectories("saved_models/evaluation_trajectories/test.npy")
+        if self.args.vis_path != "":
+            self.visualize_trajectories(self.args.vis_path)
+            return
         """
         train the network
 
@@ -303,6 +304,7 @@ class sac_agent:
 
         if self.args.rnd:
             _, intrinsic_reward_origin = self.rnd_worker.train(rnd_inputs_norm_tensor, obs_next_norm_tensor)
+            wandb.log({'intrinsic_reward': intrinsic_reward_origin.mean()}, step=self.steps+1)
             #intrinsic_reward = self.rnd_worker.get_intrinsic_reward(inputs_next_norm_tensor, obs_next_norm_tensor)
             thre = torch.max(torch.abs(intrinsic_reward_origin))
             intrinsic_reward = intrinsic_reward_origin/thre
@@ -532,7 +534,7 @@ class sac_agent:
         input_tensor = torch.cat([all_obs_actions_tensor, r_t],dim=1)
 
         # 使用process_handle处理数据
-        processed_data = self.crl_worker.train_net(input_tensor)
+        processed_data = process_handle(input_tensor)
 
         # 使用t-SNE进行降维
         tsne = TSNE(n_components=2, random_state=42)
