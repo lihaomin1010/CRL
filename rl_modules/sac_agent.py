@@ -508,42 +508,29 @@ class sac_agent:
         trajectories = np.load(trajectory_file, allow_pickle=True)
 
         # 收集所有observations和actions
-        all_obs_actions = []
-        all_distances = []
+        all_dist = []
+        all_embeddings = []
 
         for traj in trajectories:
-            obs = traj['observations']
-            actions = traj['actions']
-            achieved_goals = traj['achieved_goals']
+            dist = traj['dist']
+            embeddings = traj['embeddings']
 
-            # 计算每个时间步的欧氏距离
-            distances = np.linalg.norm(obs[:, 3:6] - achieved_goals[:, 3:6], axis=1)
 
-            # 拼接observations和actions
-            obs_actions = np.concatenate([obs, actions], axis=1)
-
-            all_obs_actions.append(obs_actions)
-            all_distances.append(distances)
+            all_dist.append(dist)
+            all_embeddings.append(embeddings)
 
         # 将所有数据合并
-        all_obs_actions = np.concatenate(all_obs_actions, axis=0)
-        all_distances = np.concatenate(all_distances, axis=0)
-
-        all_obs_actions_tensor = torch.tensor(all_obs_actions).cuda()
-        r_t = torch.rand(all_obs_actions_tensor.shape).cuda()
-        input_tensor = torch.cat([all_obs_actions_tensor, r_t],dim=1)
-
-        # 使用process_handle处理数据
-        processed_data = process_handle(input_tensor)
+        all_dist = np.concatenate(all_dist, axis=0)
+        all_embeddings = np.concatenate(all_embeddings, axis=0)
 
         # 使用t-SNE进行降维
         tsne = TSNE(n_components=2, random_state=42)
-        reduced_data = tsne.fit_transform(processed_data.detach().cpu().numpy())
+        reduced_data = tsne.fit_transform(all_embeddings)
 
         # 创建散点图
         plt.figure(figsize=(10, 8))
         scatter = plt.scatter(reduced_data[:, 0], reduced_data[:, 1],
-                              c=all_distances,
+                              c=all_dist,
                               cmap='viridis',
                               alpha=0.6)
         plt.colorbar(scatter, label='Distance between observation and achieved goal')

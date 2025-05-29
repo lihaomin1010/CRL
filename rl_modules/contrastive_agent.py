@@ -495,18 +495,16 @@ class contrastive_agent:
             per_success_rate = []
             # 存储当前轨迹的数据
             trajectory = {
-                'observations': [],
-                'actions': [],
-                'rewards': [],
-                'desired_goals': [],
-                'achieved_goals': []
+                'embeddings': [],
+                'dist': [],
             }
 
             #self.env.render_mode = 'rgb_array'
             # reset the environment
             observation = self.env.reset()
             #image = env.render(mode='rgb_array', camera_name='topview')
-            image = self.env.render(offscreen=True)
+
+
             observation = self.process_observation(observation)
             obs = observation["observation"]
             g = observation["desired_goal"]
@@ -531,8 +529,20 @@ class contrastive_agent:
                 g = observation_new["desired_goal"]
                 ag = observation_new["achieved_goal"]
 
-                trajectory['achieved_goals'].append(ag.copy())
-                trajectory['rewards'].append(reward)
+                # TODO: !!!!!!!!!!!!!!!
+                image = self.env.render(offscreen=True)
+                print("111111111111111")
+                print(image.shape)
+                print("111111111111111")
+
+                # TODO: 把这个image标准化之后转成embeddings
+
+                embeddings = None
+
+                trajectory['embeddings'].append(embeddings.copy())
+                distances = np.linalg.norm(obs[3:6] - ag[3:6])
+
+                trajectory['dist'].append(distances.copy())
                 per_success_rate.append(bool(reward))
 
                 if reward == 1.0:
