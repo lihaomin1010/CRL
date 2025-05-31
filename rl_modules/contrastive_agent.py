@@ -16,7 +16,10 @@ from rl_modules.contrastive_models import tanh_gaussian_actor, flatten_mlp_contr
 
 from rl_modules.utils import augmentBatch_SO2_fetch_push_pick
 import wandb
+import r3m
 
+import torchvision.transforms as T
+from PIL import Image
 """
 State-Based Contrastive Learning for Goal-Conditioned Reinforcement Learning
 """
@@ -33,13 +36,19 @@ class contrastive_agent:
         self.action_max = self.env.action_space.high
         self.BCE_loss = torch.nn.BCEWithLogitsLoss()
 
+        self.transforms = T.Compose([T.Resize(256),
+                                T.CenterCrop(224),
+                                T.ToTensor()])
+
 
         print("GPU:", self.args.cuda)
         if self.args.cuda:
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
-
+        self.r3m_net = r3m.load_r3m("resnet50")  # resnet18, resnet34
+        self.r3m_net.eval()
+        self.r3m_net.to(self.device)
         
         self.actor_network = tanh_gaussian_actor(
             env_params["obs"] + env_params["goal"],
@@ -122,8 +131,6 @@ class contrastive_agent:
         train the network
 
         """
-        if True:
-            self.final_eval_agent_img()
 
         # start to collect samples
         for epoch in range(self.args.n_epochs):
@@ -210,7 +217,7 @@ class contrastive_agent:
             # 每10个epoch保存一次检查点
             if (epoch + 1) % self.args.save_interval == 0:
                 self.save_checkpoint(epoch + 1)
-        self.final_eval_agent()
+                self.final_eval_agent_img(epoch)
 
     # pre_process the inputs
     def _preproc_inputs(self, obs, g):
@@ -485,7 +492,7 @@ class contrastive_agent:
         
         return success_rate
 
-    def final_eval_agent_img(self):
+    def final_eval_agent_img(self, epoch_now):
         total_success_rate = []
         # 用于存储所有轨迹数据
         all_trajectories = []
@@ -497,6 +504,11 @@ class contrastive_agent:
             trajectory = {
                 'embeddings': [],
                 'dist': [],
+                'observations': [],
+                'actions': [],
+                'rewards': [],
+                'desired_goals': [],
+                'achieved_goals': []
             }
 
             #self.env.render_mode = 'rgb_array'
@@ -525,22 +537,23 @@ class contrastive_agent:
                 observation_new, reward, _, info = self.env.step(action)
 
                 observation_new = self.process_observation(observation_new)
+                obs_old = obs
+
                 obs = observation_new["observation"]
                 g = observation_new["desired_goal"]
                 ag = observation_new["achieved_goal"]
 
                 # TODO: !!!!!!!!!!!!!!!
                 image = self.env.render(offscreen=True)
-                print("111111111111111")
-                print(image.shape)
-                print("111111111111111")
 
-                # TODO: 把这个image标准化之后转成embeddings
+                preprocessed_image = self.transforms(Image.fromarray(image.astype(np.uint8))).reshape(-1, 3, 224, 224)
+                preprocessed_image.to(self.device)
+                with torch.no_grad():
+                    embedding = self.r3m_net(preprocessed_image * 255.0)
 
-                embeddings = None
 
-                trajectory['embeddings'].append(embeddings.copy())
-                distances = np.linalg.norm(obs[3:6] - ag[3:6])
+                trajectory['embeddings'].append(embedding.detach().cpu().numpy().copy())
+                distances = np.linalg.norm(obs_old[3:6] - ag[3:6])
 
                 trajectory['dist'].append(distances.copy())
                 per_success_rate.append(bool(reward))
@@ -564,7 +577,7 @@ class contrastive_agent:
 
         # 保存所有轨迹数据
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_path = os.path.join(save_dir, f'trajectories_{timestamp}.npy')
+        save_path = os.path.join(save_dir, f'trajectories_{timestamp}_{epoch_now}.npy')
         np.save(save_path, all_trajectories)
         print(f'[INFO] 轨迹数据已保存到: {save_path}')
         print(f'[INFO] 最终评估成功率: {success_rate:.3f}')

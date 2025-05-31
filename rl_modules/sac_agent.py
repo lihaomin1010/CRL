@@ -496,7 +496,7 @@ class sac_agent:
 
     def visualize_trajectories(self, trajectory_file):
         """
-        读取轨迹数据并进行可视化
+        读取轨迹数据并进行可视化，将轨迹分成10个部分分别进行t-SNE降维
         Args:
             trajectory_file: 轨迹数据文件路径
         """
@@ -506,43 +506,58 @@ class sac_agent:
 
         # 读取轨迹数据
         trajectories = np.load(trajectory_file, allow_pickle=True)
+        
+        # 检查轨迹长度
+        traj_lengths = [len(traj['dist']) for traj in trajectories]
+        if len(set(traj_lengths)) != 1:
+            print(f"[WARNING] 轨迹长度不一致: {traj_lengths}")
+        else:
+            print(f"[INFO] 所有轨迹长度一致: {traj_lengths[0]}")
 
-        # 收集所有observations和actions
-        all_dist = []
-        all_embeddings = []
+        # 计算每个部分的长度
+        total_length = traj_lengths[0]
+        segment_length = total_length // 10
 
-        for traj in trajectories:
-            dist = traj['dist']
-            embeddings = traj['embeddings']
+        # 对每个部分进行可视化
+        for segment_idx in range(10):
+            start_idx = segment_idx * segment_length
+            end_idx = (segment_idx + 1) * segment_length if segment_idx < 9 else total_length
+            
+            # 收集当前部分的所有数据
+            all_dist = []
+            all_embeddings = []
 
+            for traj in trajectories:
+                dist = traj['dist'][start_idx:end_idx]
+                embeddings = traj['embeddings'][start_idx:end_idx]
+                
+                all_dist.append(dist)
+                all_embeddings.append(np.squeeze(embeddings, axis=1))
 
-            all_dist.append(dist)
-            all_embeddings.append(embeddings)
+            # 将所有数据合并
+            all_dist = np.concatenate(all_dist, axis=0)
+            all_embeddings = np.concatenate(all_embeddings, axis=0)
 
-        # 将所有数据合并
-        all_dist = np.concatenate(all_dist, axis=0)
-        all_embeddings = np.concatenate(all_embeddings, axis=0)
+            # 使用t-SNE进行降维
+            tsne = TSNE(n_components=2, random_state=42)
+            reduced_data = tsne.fit_transform(all_embeddings)
 
-        # 使用t-SNE进行降维
-        tsne = TSNE(n_components=2, random_state=42)
-        reduced_data = tsne.fit_transform(all_embeddings)
+            # 创建散点图
+            plt.figure(figsize=(10, 8))
+            scatter = plt.scatter(reduced_data[:, 0], reduced_data[:, 1],
+                                c=all_dist,
+                                cmap='viridis',
+                                alpha=0.6)
+            plt.colorbar(scatter, label='Distance between observation and achieved goal')
+            plt.title(f't-SNE visualization of trajectories (Segment {segment_idx + 1}/10)')
+            plt.xlabel('t-SNE dimension 1')
+            plt.ylabel('t-SNE dimension 2')
 
-        # 创建散点图
-        plt.figure(figsize=(10, 8))
-        scatter = plt.scatter(reduced_data[:, 0], reduced_data[:, 1],
-                              c=all_dist,
-                              cmap='viridis',
-                              alpha=0.6)
-        plt.colorbar(scatter, label='Distance between observation and achieved goal')
-        plt.title('t-SNE visualization of trajectories')
-        plt.xlabel('t-SNE dimension 1')
-        plt.ylabel('t-SNE dimension 2')
+            # 保存图像
+            save_dir = os.path.join(self.args.save_dir, 'visualizations')
+            os.makedirs(save_dir, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plt.savefig(os.path.join(save_dir, f'tsne_visualization_segment_{segment_idx + 1}_{timestamp}.png'))
+            plt.close()
 
-        # 保存图像
-        save_dir = os.path.join(self.args.save_dir, 'visualizations')
-        os.makedirs(save_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        plt.savefig(os.path.join(save_dir, f'tsne_visualization_{timestamp}.png'))
-        plt.close()
-
-        print(f'[INFO] 可视化结果已保存到: {save_dir}')
+            print(f'[INFO] 第 {segment_idx + 1} 段轨迹的可视化结果已保存到: {save_dir}')
