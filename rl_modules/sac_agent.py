@@ -302,7 +302,10 @@ class sac_agent:
             r_tensor = r_tensor.cuda()
 
         if self.args.rnd:
-            _, intrinsic_reward_origin = self.rnd_worker.train(rnd_inputs_norm_tensor, obs_next_norm_tensor)
+            need_train = True
+            if self.args.stop_rnd and self.steps > 3000:
+                need_train = False
+            _, intrinsic_reward_origin = self.rnd_worker.train(rnd_inputs_norm_tensor, obs_next_norm_tensor, need_train=need_train)
             #intrinsic_reward = self.rnd_worker.get_intrinsic_reward(inputs_next_norm_tensor, obs_next_norm_tensor)
             thre = torch.max(torch.abs(intrinsic_reward_origin))
             intrinsic_reward = intrinsic_reward_origin/thre

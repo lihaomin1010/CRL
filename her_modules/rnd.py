@@ -50,7 +50,7 @@ class RND:
         # 优化器
         self.optimizer = optim.Adam(self.train_net.parameters(), lr=self.lr)
 
-    def train(self, input_tensor, target_tensor):
+    def train(self, input_tensor, target_tensor, need_train=True):
 
         # 前向传播
         train_output = self.train_net(input_tensor)
